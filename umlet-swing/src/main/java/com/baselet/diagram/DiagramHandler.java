@@ -189,6 +189,14 @@ public class DiagramHandler {
 		return doSaveAs(null, extension);
 	}
 
+	public void doExportToXMI() {
+        try {
+            fileHandler.doExportAsXMI();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 	public void doPrint() {
 		PrinterJob printJob = PrinterJob.getPrinterJob();
 		printJob.setPrintable(getDrawPanel());

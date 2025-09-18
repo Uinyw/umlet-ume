@@ -16,6 +16,7 @@ public class MenuConstants {
 	public static final String SAVE_AS = "Save as...";
 	public static final String EXPORT = "Export...";
 	public static final String EXPORT_AS = "Export as...";
+	public static final String EXPORT_AS_XMI = "Export as XMI";
 	public static final String MAIL_TO = "Mail to...";
 	public static final String EDIT_CURRENT_PALETTE = "Edit Current Palette";
 	public static final String OPTIONS = "Options...";

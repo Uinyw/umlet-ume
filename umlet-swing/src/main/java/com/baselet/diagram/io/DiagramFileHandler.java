@@ -9,23 +9,16 @@ import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
+import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import javax.swing.JFileChooser;
 import javax.swing.JOptionPane;
 import javax.swing.filechooser.FileFilter;
 import javax.xml.XMLConstants;
-import javax.xml.parsers.DocumentBuilder;
-import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.SAXParser;
-import javax.xml.parsers.SAXParserFactory;
-import javax.xml.transform.OutputKeys;
-import javax.xml.transform.Transformer;
-import javax.xml.transform.TransformerFactory;
+import javax.xml.parsers.*;
+import javax.xml.transform.*;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
@@ -344,6 +337,309 @@ public class DiagramFileHandler {
 		}
 		// CustomElementSecurityManager.remThreadPrivileges(Thread.currentThread());
 	}
+
+	public void doExportAsXMI() throws IOException {
+		final String chosenExtension = "xml";
+		JFileChooser fileChooser = createSaveFileChooser(true, null);
+		String chosenFileName = chooseFileName(true, new OwnFileFilter(chosenExtension, "XML"), fileChooser);
+		if (chosenFileName == null) {
+			return;
+		}
+		if (!chosenFileName.endsWith("." + chosenExtension)) {
+			if (chosenFileName.endsWith(".null")) {
+				chosenFileName = chosenFileName.substring(0, chosenFileName.length() - 5);
+			}
+			chosenFileName += "." + chosenExtension;
+		}
+
+		File fileToSave = new File(chosenFileName);
+
+        String tmp;
+        try {
+            tmp = buildXMI();
+        } catch (ParserConfigurationException | TransformerException e) {
+            throw new RuntimeException(e);
+        }
+        PrintWriter out = new PrintWriter(new OutputStreamWriter(new FileOutputStream(fileToSave), "UTF-8"));
+		out.print(tmp);
+		out.close();
+		Notifier.getInstance().showInfo("Huhu");
+	}
+
+	private String buildXMI() throws ParserConfigurationException, TransformerException {
+		final String UML_NS = "http://www.omg.org/spec/UML/20090901";
+		final String XMI_NS = "http://www.omg.org/XMI";
+		final String UML_PRIMITIVE_TYPES = "http://www.omg.org/spec/UML/20090901/PrimitiveTypes.xml";
+
+		// Initialize XML document
+		DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
+		DocumentBuilder db = dbf.newDocumentBuilder();
+		Document xmiDoc = db.newDocument();
+
+		// Root <xmi:XMI>
+		Element xmiRoot = xmiDoc.createElementNS(XMI_NS, "xmi:XMI");
+		xmiRoot.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:xmi", XMI_NS);
+		xmiRoot.setAttributeNS("http://www.w3.org/2000/xmlns/", "xmlns:uml", UML_NS);
+		xmiRoot.setAttribute("xmi:version", "2.1");
+		xmiDoc.appendChild(xmiRoot);
+
+		// UML Model
+		Element model = xmiDoc.createElementNS(UML_NS, "uml:Model");
+		model.setAttribute("xmi:type", "uml:Model");
+		model.setAttribute("xmi:id", "model1");
+		model.setAttribute("name", "UMLetExport");
+		xmiRoot.appendChild(model);
+
+		// ---------- PASS 1: Collect all classes ----------
+		Map<String, String> classNameToId = new HashMap<String, String>();
+		List<NewGridElement> classElements = new ArrayList<NewGridElement>();
+		int classCounter = 1;
+
+		for (GridElement element : handler.getDrawPanel().getGridElements()) {
+			if (element instanceof NewGridElement) {
+				NewGridElement ge = (NewGridElement) element;
+				if ("UMLClass".equals(ge.getId().toString())) {
+					String raw = ge.getPanelAttributes().replace("&lt;", "<").replace("&gt;", ">");
+					String[] lines = raw.split("\n");
+
+					String className = "";
+					for (String line : lines) {
+						if (!line.trim().isEmpty() && !line.trim().startsWith("<<") && !line.contains(":")) {
+							className = line.trim();
+							break;
+						}
+					}
+
+					if (!className.isEmpty()) {
+						String classId = "class" + classCounter++;
+						classNameToId.put(className, classId);
+						classElements.add(ge);
+					}
+				}
+			}
+		}
+
+		// ---------- PASS 2: Build UML classes ----------
+		int featureCounter = 1; // shared counter for attributes + operations
+		for (NewGridElement ge : classElements) {
+			String raw = ge.getPanelAttributes().replace("&lt;", "<").replace("&gt;", ">");
+			String[] lines = raw.split("\n");
+
+			String stereotype = "";
+			String className = "";
+			List<String> attributes = new ArrayList<String>();
+			List<String> operations = new ArrayList<String>();
+
+			boolean inAttributes = false, inOperations = false;
+
+			for (String line : lines) {
+				line = line.trim();
+				if (line.isEmpty()) continue;
+
+				if (line.startsWith("<<") && line.endsWith(">>")) {
+					stereotype = line.substring(2, line.length() - 2).trim();
+				} else if (className.isEmpty() && !line.contains(":") && !line.equals("-")) {
+					className = line;
+				} else if (line.equals("-")) {
+					if (!inAttributes) { inAttributes = true; }
+					else if (!inOperations) { inAttributes = false; inOperations = true; }
+				} else if (inAttributes) {
+					attributes.add(line);
+				} else if (inOperations) {
+					operations.add(line);
+				}
+			}
+
+			String classId = classNameToId.get(className);
+			Element classElement = xmiDoc.createElementNS(UML_NS, "packagedElement");
+			classElement.setAttribute("xmi:type", "uml:Class");
+			classElement.setAttribute("xmi:id", classId);
+			classElement.setAttribute("name", className);
+			if (!stereotype.isEmpty()) {
+				classElement.setAttribute("stereotype", stereotype);
+			}
+
+			// ----- Attributes -----
+			for (String attr : attributes) {
+				String[] parts = attr.split(":");
+				if (parts.length == 2) {
+					String attrName = parts[0].trim();
+					String attrType = parts[1].trim();
+
+					boolean isArray = attrType.endsWith("[]");
+					if (isArray) {
+						attrType = attrType.substring(0, attrType.length() - 2);
+					}
+
+					Element attrElem = xmiDoc.createElementNS(UML_NS, "ownedAttribute");
+					attrElem.setAttribute("name", attrName);
+					attrElem.setAttribute("xmi:id", classId + "_attr" + featureCounter++);
+
+					// Type reference
+					Element typeElem = xmiDoc.createElementNS(UML_NS, "type");
+					if (classNameToId.containsKey(attrType)) {
+						typeElem.setAttribute("xmi:type", "uml:Class");
+						typeElem.setAttribute("href", "#" + classNameToId.get(attrType));
+					} else {
+						typeElem.setAttribute("xmi:type", "uml:PrimitiveType");
+						typeElem.setAttribute("href", UML_PRIMITIVE_TYPES + "#" + attrType);
+					}
+					attrElem.appendChild(typeElem);
+
+					// Multiplicity for arrays
+					if (isArray) {
+						Element lower = xmiDoc.createElementNS(UML_NS, "lowerValue");
+						lower.setAttribute("xmi:type", "uml:LiteralInteger");
+						lower.setAttribute("xmi:id", attrElem.getAttribute("xmi:id") + "_lower");
+						lower.setAttribute("value", "0");
+
+						Element upper = xmiDoc.createElementNS(UML_NS, "upperValue");
+						upper.setAttribute("xmi:type", "uml:LiteralUnlimitedNatural");
+						upper.setAttribute("xmi:id", attrElem.getAttribute("xmi:id") + "_upper");
+						upper.setAttribute("value", "*");
+
+						attrElem.appendChild(lower);
+						attrElem.appendChild(upper);
+					}
+
+					classElement.appendChild(attrElem);
+				}
+			}
+
+			// ----- Operations -----
+			for (String op : operations) {
+				// Example: create(input: Input): Output
+				String opName = op;
+				String paramPart = "";
+				String returnType = null;
+
+				// Extract return type (last colon after params)
+				if (op.contains(":")) {
+					int lastColon = op.lastIndexOf(":");
+					returnType = op.substring(lastColon + 1).trim();
+					opName = op.substring(0, lastColon).trim();
+				}
+
+				// Extract parameters
+				List<String[]> params = new ArrayList<String[]>();
+				int start = opName.indexOf("(");
+				int end = opName.indexOf(")");
+				if (start != -1 && end != -1 && end > start) {
+					paramPart = opName.substring(start + 1, end).trim();
+					opName = opName.substring(0, start).trim();
+
+					if (!paramPart.isEmpty()) {
+						for (String p : paramPart.split(",")) {
+							String[] parts = p.trim().split(":");
+							if (parts.length == 2) {
+								params.add(new String[]{parts[0].trim(), parts[1].trim()});
+							}
+						}
+					}
+				}
+
+				Element opElem = xmiDoc.createElementNS(UML_NS, "ownedOperation");
+				opElem.setAttribute("name", opName);
+				opElem.setAttribute("xmi:id", classId + "_op" + featureCounter++);
+
+				int paramIndex = 1;
+				for (String[] param : params) {
+					String paramName = param[0];
+					String paramType = param[1];
+					boolean isArray = paramType.endsWith("[]");
+					if (isArray) {
+						paramType = paramType.substring(0, paramType.length() - 2);
+					}
+
+					Element paramElem = xmiDoc.createElementNS(UML_NS, "ownedParameter");
+					paramElem.setAttribute("xmi:id", classId + "_op" + (featureCounter - 1) + "_p" + paramIndex++);
+					paramElem.setAttribute("name", paramName);
+					paramElem.setAttribute("direction", "in");
+
+					Element typeElem = xmiDoc.createElementNS(UML_NS, "type");
+					if (classNameToId.containsKey(paramType)) {
+						typeElem.setAttribute("xmi:type", "uml:Class");
+						typeElem.setAttribute("href", "#" + classNameToId.get(paramType));
+					} else {
+						typeElem.setAttribute("xmi:type", "uml:PrimitiveType");
+						typeElem.setAttribute("href", UML_PRIMITIVE_TYPES + "#" + paramType);
+					}
+					paramElem.appendChild(typeElem);
+
+					if (isArray) {
+						Element lower = xmiDoc.createElementNS(UML_NS, "lowerValue");
+						lower.setAttribute("xmi:type", "uml:LiteralInteger");
+						lower.setAttribute("xmi:id", paramElem.getAttribute("xmi:id") + "_lower");
+						lower.setAttribute("value", "0");
+
+						Element upper = xmiDoc.createElementNS(UML_NS, "upperValue");
+						upper.setAttribute("xmi:type", "uml:LiteralUnlimitedNatural");
+						upper.setAttribute("xmi:id", paramElem.getAttribute("xmi:id") + "_upper");
+						upper.setAttribute("value", "*");
+
+						paramElem.appendChild(lower);
+						paramElem.appendChild(upper);
+					}
+
+					opElem.appendChild(paramElem);
+				}
+
+				// Return type
+				if (returnType != null && !returnType.isEmpty()) {
+					boolean isArray = returnType.endsWith("[]");
+					if (isArray) {
+						returnType = returnType.substring(0, returnType.length() - 2);
+					}
+
+					Element retElem = xmiDoc.createElementNS(UML_NS, "ownedParameter");
+					retElem.setAttribute("xmi:id", classId + "_op" + (featureCounter - 1) + "_ret");
+					retElem.setAttribute("name", "return");
+					retElem.setAttribute("direction", "return");
+
+					Element typeElem = xmiDoc.createElementNS(UML_NS, "type");
+					if (classNameToId.containsKey(returnType)) {
+						typeElem.setAttribute("xmi:type", "uml:Class");
+						typeElem.setAttribute("href", "#" + classNameToId.get(returnType));
+					} else {
+						typeElem.setAttribute("xmi:type", "uml:PrimitiveType");
+						typeElem.setAttribute("href", UML_PRIMITIVE_TYPES + "#" + returnType);
+					}
+					retElem.appendChild(typeElem);
+
+					if (isArray) {
+						Element lower = xmiDoc.createElementNS(UML_NS, "lowerValue");
+						lower.setAttribute("xmi:type", "uml:LiteralInteger");
+						lower.setAttribute("xmi:id", retElem.getAttribute("xmi:id") + "_lower");
+						lower.setAttribute("value", "0");
+
+						Element upper = xmiDoc.createElementNS(UML_NS, "uml:LiteralUnlimitedNatural");
+						upper.setAttribute("xmi:id", retElem.getAttribute("xmi:id") + "_upper");
+						upper.setAttribute("value", "*");
+
+						retElem.appendChild(lower);
+						retElem.appendChild(upper);
+					}
+
+					opElem.appendChild(retElem);
+				}
+
+				classElement.appendChild(opElem);
+			}
+
+			model.appendChild(classElement);
+		}
+
+		// ---------- Output ----------
+		Transformer transformer = TransformerFactory.newInstance().newTransformer();
+		transformer.setOutputProperty(OutputKeys.INDENT, "yes");
+		transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
+
+		StringWriter stringWriter = new StringWriter();
+		transformer.transform(new DOMSource(xmiDoc), new StreamResult(stringWriter));
+		return stringWriter.toString();
+	}
+
+
 
 	private void save() throws UnsupportedEncodingException, FileNotFoundException {
 		save(file, false); // If save is called without a parameter it uses the class variable "file"
