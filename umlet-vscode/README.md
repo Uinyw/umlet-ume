@@ -1,4 +1,4 @@
-# **UMLet+UME -- Free UML Tool for Fast UML Diagrams with Support for UME Artifacts**
+# **UMLet -- Free UML Tool for Fast UML Diagrams**
 
 [umlet.com](https://www.umlet.com/) -- [info@umlet.com](mailto:info@umlet.com) -- [patreon.com/umlet](https://www.patreon.com/umlet)
 

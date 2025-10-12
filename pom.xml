@@ -43,7 +43,9 @@
 		<module>umlet-elements</module>
 		<module>umlet-res</module>
 		<module>umlet-gwt</module>
-		<module>umlet-vscode</module>
+		<module>umlet-swing</module>
+		<!--<module>umlet-vscode</module>-->
+		<module>umlet-standalone</module>
 	</modules>
 
 	<dependencies>
