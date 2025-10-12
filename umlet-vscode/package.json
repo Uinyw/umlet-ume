@@ -1,11 +1,11 @@
 {
   "name": "umlet",
-  "displayName": "UMLet+UME",
-  "description": "Free UML Tool for Fast UML Diagrams with Support for UME Artifacts",
+  "displayName": "UMLet",
+  "description": "Free UML Tool for Fast UML Diagrams",
   "version": "15.2.0-SNAPSHOT",
-  "publisher": "CM",
+  "publisher": "theumletteam",
   "author": {
-    "name": "C&M"
+    "name": "The UMLet Team"
   },
   "icon": "icons/UMLet_logo_128x128.png",
   "extensionKind": [
