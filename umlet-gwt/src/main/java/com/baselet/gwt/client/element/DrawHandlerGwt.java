@@ -68,7 +68,7 @@ public class DrawHandlerGwt extends DrawHandler {
 
 	@Override
 	protected double getDefaultFontSize() {
-		return 12;
+		return 18;
 	}
 
 	@Override
